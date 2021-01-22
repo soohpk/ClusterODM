@@ -39,7 +39,7 @@ const assureUniqueFilename = (dstPath, filename) => {
             else{
                 const parts = filename.split(".");
                 if (parts.length > 1){
-                    resolve(await assureUniqueFilename(dstPath, 
+                    resolve(await assureUniqueFilename(dstPath,
                         `${parts.slice(0, parts.length - 1).join(".")}_.${parts[parts.length - 1]}`));
                 }else{
                     // Filename without extension? Strange..
@@ -51,7 +51,7 @@ const assureUniqueFilename = (dstPath, filename) => {
 };
 
 module.exports = {
-    // @return {object} Context object with methods and variables to use during task/new operations 
+    // @return {object} Context object with methods and variables to use during task/new operations
     createContext: function(req, res){
         const uuid = utils.uuidv4(); // TODO: add support for set-uuid header parameter
         const tmpPath = path.join('tmp', uuid);
@@ -59,7 +59,7 @@ module.exports = {
         if (!fs.existsSync(tmpPath)) fs.mkdirSync(tmpPath);
 
         return {
-            uuid, 
+            uuid,
             tmpPath,
             die: (err) => {
                 utils.rmdir(tmpPath);
@@ -72,7 +72,7 @@ module.exports = {
     formDataParser: function(req, onFinish, options = {}){
         if (options.saveFilesToDir === undefined) options.saveFilesToDir = false;
         if (options.parseFields === undefined) options.parseFields = true;
-        
+
         const busboy = new Busboy({ headers: req.headers });
 
         const params = {
@@ -94,15 +94,15 @@ module.exports = {
                 if (fieldname === 'options'){
                     params.options = val;
                 }
-    
+
                 else if (fieldname === 'zipurl' && val){
                     params.error = "File upload via URL is not available. Sorry :(";
                 }
-    
+
                 else if (fieldname === 'name' && val){
                     params.taskName = val;
                 }
-    
+
                 else if (fieldname === 'skipPostProcessing' && val === 'true'){
                     params.skipPostProcessing = val;
                 }
@@ -124,7 +124,7 @@ module.exports = {
             busboy.on('file', async function(fieldname, file, filename, encoding, mimetype) {
                 if (fieldname === 'images'){
                     filename = utils.sanitize(filename);
-                    
+
                     // Special case
                     if (filename === 'body.json') filename = '_body.json';
 
@@ -132,7 +132,7 @@ module.exports = {
 
                     const name = path.basename(filename);
                     params.fileNames.push(name);
-        
+
                     const saveTo = path.join(options.saveFilesToDir, name);
                     let saveStream = null;
 
@@ -166,7 +166,7 @@ module.exports = {
     getTaskIdFromPath: function(pathname){
         const matches = pathname.match(/\/([\w\d]+\-[\w\d]+\-[\w\d]+\-[\w\d]+\-[\w\d]+)$/);
         if (matches && matches[1]){
-            return matches[1];        
+            return matches[1];
         }else return null;
     },
 
@@ -219,7 +219,7 @@ module.exports = {
                     let lo = limitOptions[odmOption.name];
 
                     if (assureOptions[odmOption.name]) delete(assureOptions[odmOption.name]);
-        
+
                     // Modify value if between range rules command so
                     if (lo.between !== undefined){
                         if (lo.between.max_if_equal_to !== undefined && lo.between.max !== undefined &&
@@ -267,7 +267,7 @@ module.exports = {
         let node = await nodes.findBestAvailableNode(imagesCount, true);
 
         // Do we need to / can we create a new node via autoscaling?
-        const autoscale = (!node || node.availableSlots() === 0) && 
+        const autoscale = (!node || node.availableSlots() === 0) &&
                             asrProvider.isAllowedToCreateNewNodes() &&
                             asrProvider.canHandle(fileNames.length);
 
@@ -276,7 +276,7 @@ module.exports = {
         if (node){
             // Validate options
             // Will throw an exception on failure
-            let taskOptions = odmOptions.filterOptions(this.augmentTaskOptions(req, options, limits, token), 
+            let taskOptions = odmOptions.filterOptions(this.augmentTaskOptions(req, options, limits, token),
                                                         await getLimitedOptions(token, limits, node));
 
             const dateC = dateCreated !== null ? new Date(dateCreated) : new Date();
@@ -301,7 +301,7 @@ module.exports = {
                 // We use CURL, because NodeJS libraries are buggy
                 const curl = new Curl(),
                       close = curl.close.bind(curl);
-                
+
                 const tryClose = () => {
                     try{
                         close();
@@ -383,13 +383,13 @@ module.exports = {
                         });
                     }
 
-                    const curl = curlInstance(resolve, reject, 
+                    const curl = curlInstance(resolve, reject,
                         `${node.proxyTargetUrl()}/task/new/init?token=${node.getToken()}`,
                         body,
                         (res) => {
                             if (res.uuid !== uuid) throw new Error(`set-uuid did not match, ${res.uuid} !== ${uuid}`);
                         });
-                    
+
                     curl.setOpt(Curl.option.HTTPHEADER, [
                         'Content-Type: multipart/form-data',
                         `set-uuid: ${uuid}`
@@ -400,25 +400,25 @@ module.exports = {
 
             const taskNewUpload = async () => {
                 return new Promise((resolve, reject) => {
-                    const MAX_RETRIES = 5;
+                    const MAX_RETRIES = 6 * 10; // 10초마다 60회 10분간 try
 
                     const chunks = utils.chunkArray(fileNames, Math.ceil(fileNames.length / PARALLEL_UPLOADS));
                     let completed = 0;
                     const done = () => {
                         if (++completed >= chunks.length) resolve();
                     };
-                    
+
                     chunks.forEach(fileNames => {
                         let retries = 0;
                         const body = fileNames.map(f => { return { name: 'images', file: path.join(tmpPath, f) } });
-                        
+
                         const curl = curlInstance(done, async (err) => {
                                 if (status.aborted) return; // Ignore if this was aborted by other code
 
                                 if (retries < MAX_RETRIES){
                                     retries++;
                                     logger.warn(`File upload to ${node} failed, retrying... (${retries})`);
-                                    await utils.sleep(2000);
+                                    await utils.sleep(10000); // 2초 => 10초
                                     curl.perform();
                                 }else{
                                     reject(new Error(`${err.message}: maximum upload retries (${MAX_RETRIES}) exceeded`));
@@ -478,7 +478,7 @@ module.exports = {
             };
 
             const doUpload = async () => {
-                const MAX_UPLOAD_RETRIES = 5;
+                const MAX_UPLOAD_RETRIES = 60; // 30초 마다 60회 retry (30분간)
                 eventEmitter.emit('close');
 
                 try{
@@ -490,7 +490,7 @@ module.exports = {
                     if (retries < MAX_UPLOAD_RETRIES){
                         retries++;
                         logger.warn(`Attempted to forward task ${uuid} to processing node ${node} but failed with: ${e.message}, attempting again (retry: ${retries})`);
-                        await utils.sleep(1000 * 5 * retries);
+                        await utils.sleep(1000 * 30); // 30초 마다 retry
 
                         // If autoscale is enabled, simply retry on same node
                         // otherwise switch to another node
@@ -510,7 +510,7 @@ module.exports = {
                         throw new Error(`Failed to forward task to processing node after ${retries} attempts. Try again later.`);
                     }
                 }
-            };  
+            };
 
             // Add item to task table
             await tasktable.add(uuid, { taskInfo, abort: abortTask, output: ["Launching... please wait! This can take a few minutes."] }, token);
